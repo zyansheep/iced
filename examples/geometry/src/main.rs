@@ -166,7 +166,7 @@ use iced::{
 };
 use rainbow::Rainbow;
 
-pub fn main() {
+pub fn main() -> iced::Result {
     Example::run(Settings::default())
 }
 

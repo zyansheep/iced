@@ -1,7 +1,9 @@
 //! Create interactive, native cross-platform applications.
+use crate::conversion;
+use crate::mouse;
 use crate::{
-    conversion, mouse, Clipboard, Color, Command, Debug, Executor, Mode, Proxy,
-    Runtime, Settings, Size, Subscription,
+    Clipboard, Color, Command, Debug, Error, Executor, Mode, Proxy, Runtime,
+    Settings, Size, Subscription,
 };
 use iced_graphics::window;
 use iced_graphics::Viewport;
@@ -108,7 +110,8 @@ pub trait Application: Program {
 pub fn run<A, E, C>(
     settings: Settings<A::Flags>,
     compositor_settings: C::Settings,
-) where
+) -> Result<(), Error>
+where
     A: Application + 'static,
     E: Executor + 'static,
     C: window::Compositor<Renderer = A::Renderer> + 'static,
@@ -123,7 +126,7 @@ pub fn run<A, E, C>(
 
     let event_loop = EventLoop::with_user_event();
     let mut runtime = {
-        let executor = E::new().expect("Create executor");
+        let executor = E::new().map_err(Error::ExecutorCreationFailed)?;
         let proxy = Proxy::new(event_loop.create_proxy());
 
         Runtime::new(executor, proxy)
@@ -145,9 +148,10 @@ pub fn run<A, E, C>(
         .window
         .into_builder(&title, mode, event_loop.primary_monitor())
         .build(&event_loop)
-        .expect("Open window");
+        .map_err(Error::WindowCreationFailed)?;
 
     let clipboard = Clipboard::new(&window);
+    // TODO: Encode cursor availability in the type-system
     let mut cursor_position = winit::dpi::PhysicalPosition::new(-1.0, -1.0);
     let mut mouse_interaction = mouse::Interaction::default();
     let mut modifiers = winit::event::ModifiersState::default();
@@ -159,7 +163,7 @@ pub fn run<A, E, C>(
     );
     let mut resized = false;
 
-    let (mut compositor, mut renderer) = C::new(compositor_settings);
+    let (mut compositor, mut renderer) = C::new(compositor_settings)?;
 
     let surface = compositor.create_surface(&window);
 
@@ -377,6 +381,10 @@ pub fn handle_window_event(
         }
         WindowEvent::CursorMoved { position, .. } => {
             *cursor_position = *position;
+        }
+        WindowEvent::CursorLeft { .. } => {
+            // TODO: Encode cursor availability in the type-system
+            *cursor_position = winit::dpi::PhysicalPosition::new(-1.0, -1.0);
         }
         WindowEvent::ModifiersChanged(new_modifiers) => {
             *modifiers = *new_modifiers;
