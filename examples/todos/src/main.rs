@@ -1,7 +1,10 @@
+use iced::alignment::{self, Alignment};
+use iced::button::{self, Button};
+use iced::scrollable::{self, Scrollable};
+use iced::text_input::{self, TextInput};
 use iced::{
-    button, scrollable, text_input, Align, Application, Button, Checkbox,
-    Clipboard, Column, Command, Container, Element, Font, HorizontalAlignment,
-    Length, Row, Scrollable, Settings, Text, TextInput,
+    Application, Checkbox, Column, Command, Container, Element, Font, Length,
+    Row, Settings, Text,
 };
 use serde::{Deserialize, Serialize};
 
@@ -58,11 +61,7 @@ impl Application for Todos {
         format!("Todos{} - Iced", if dirty { "*" } else { "" })
     }
 
-    fn update(
-        &mut self,
-        message: Message,
-        _clipboard: &mut Clipboard,
-    ) -> Command<Message> {
+    fn update(&mut self, message: Message) -> Command<Message> {
         match self {
             Todos::Loading => {
                 match message {
@@ -155,7 +154,7 @@ impl Application for Todos {
                     .width(Length::Fill)
                     .size(100)
                     .color([0.5, 0.5, 0.5])
-                    .horizontal_alignment(HorizontalAlignment::Center);
+                    .horizontal_alignment(alignment::Horizontal::Center);
 
                 let input = TextInput::new(
                     input,
@@ -265,8 +264,11 @@ impl Task {
                 self.completed = completed;
             }
             TaskMessage::Edit => {
+                let mut text_input = text_input::State::focused();
+                text_input.select_all();
+
                 self.state = TaskState::Editing {
-                    text_input: text_input::State::focused(),
+                    text_input,
                     delete_button: button::State::new(),
                 };
             }
@@ -296,7 +298,7 @@ impl Task {
 
                 Row::new()
                     .spacing(20)
-                    .align_items(Align::Center)
+                    .align_items(Alignment::Center)
                     .push(checkbox)
                     .push(
                         Button::new(edit_button, edit_icon())
@@ -321,7 +323,7 @@ impl Task {
 
                 Row::new()
                     .spacing(20)
-                    .align_items(Align::Center)
+                    .align_items(Alignment::Center)
                     .push(text_input)
                     .push(
                         Button::new(
@@ -361,8 +363,10 @@ impl Controls {
         let filter_button = |state, label, filter, current_filter| {
             let label = Text::new(label).size(16);
             let button =
-                Button::new(state, label).style(style::Button::Filter {
-                    selected: filter == current_filter,
+                Button::new(state, label).style(if filter == current_filter {
+                    style::Button::FilterSelected
+                } else {
+                    style::Button::FilterActive
                 });
 
             button.on_press(Message::FilterChanged(filter)).padding(8)
@@ -370,9 +374,9 @@ impl Controls {
 
         Row::new()
             .spacing(20)
-            .align_items(Align::Center)
+            .align_items(Alignment::Center)
             .push(
-                Text::new(&format!(
+                Text::new(format!(
                     "{} {} left",
                     tasks_left,
                     if tasks_left == 1 { "task" } else { "tasks" }
@@ -432,7 +436,7 @@ impl Filter {
 fn loading_message<'a>() -> Element<'a, Message> {
     Container::new(
         Text::new("Loading...")
-            .horizontal_alignment(HorizontalAlignment::Center)
+            .horizontal_alignment(alignment::Horizontal::Center)
             .size(50),
     )
     .width(Length::Fill)
@@ -446,7 +450,7 @@ fn empty_message<'a>(message: &str) -> Element<'a, Message> {
         Text::new(message)
             .width(Length::Fill)
             .size(25)
-            .horizontal_alignment(HorizontalAlignment::Center)
+            .horizontal_alignment(alignment::Horizontal::Center)
             .color([0.7, 0.7, 0.7]),
     )
     .width(Length::Fill)
@@ -462,10 +466,10 @@ const ICONS: Font = Font::External {
 };
 
 fn icon(unicode: char) -> Text {
-    Text::new(&unicode.to_string())
+    Text::new(unicode.to_string())
         .font(ICONS)
         .width(Length::Units(20))
-        .horizontal_alignment(HorizontalAlignment::Center)
+        .horizontal_alignment(alignment::Horizontal::Center)
         .size(20)
 }
 
@@ -600,7 +604,8 @@ mod style {
     use iced::{button, Background, Color, Vector};
 
     pub enum Button {
-        Filter { selected: bool },
+        FilterActive,
+        FilterSelected,
         Icon,
         Destructive,
     }
@@ -608,20 +613,15 @@ mod style {
     impl button::StyleSheet for Button {
         fn active(&self) -> button::Style {
             match self {
-                Button::Filter { selected } => {
-                    if *selected {
-                        button::Style {
-                            background: Some(Background::Color(
-                                Color::from_rgb(0.2, 0.2, 0.7),
-                            )),
-                            border_radius: 10.0,
-                            text_color: Color::WHITE,
-                            ..button::Style::default()
-                        }
-                    } else {
-                        button::Style::default()
-                    }
-                }
+                Button::FilterActive => button::Style::default(),
+                Button::FilterSelected => button::Style {
+                    background: Some(Background::Color(Color::from_rgb(
+                        0.2, 0.2, 0.7,
+                    ))),
+                    border_radius: 10.0,
+                    text_color: Color::WHITE,
+                    ..button::Style::default()
+                },
                 Button::Icon => button::Style {
                     text_color: Color::from_rgb(0.5, 0.5, 0.5),
                     ..button::Style::default()
@@ -644,9 +644,7 @@ mod style {
             button::Style {
                 text_color: match self {
                     Button::Icon => Color::from_rgb(0.2, 0.2, 0.7),
-                    Button::Filter { selected } if !selected => {
-                        Color::from_rgb(0.2, 0.2, 0.7)
-                    }
+                    Button::FilterActive => Color::from_rgb(0.2, 0.2, 0.7),
                     _ => active.text_color,
                 },
                 shadow_offset: active.shadow_offset + Vector::new(0.0, 1.0),

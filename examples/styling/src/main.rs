@@ -1,7 +1,7 @@
 use iced::{
-    button, scrollable, slider, text_input, Align, Button, Checkbox, Column,
-    Container, Element, Length, ProgressBar, Radio, Row, Rule, Sandbox,
-    Scrollable, Settings, Slider, Space, Text, TextInput,
+    button, scrollable, slider, text_input, Alignment, Button, Checkbox,
+    Column, Container, Element, Length, ProgressBar, Radio, Row, Rule, Sandbox,
+    Scrollable, Settings, Slider, Space, Text, TextInput, Toggler,
 };
 
 pub fn main() -> iced::Result {
@@ -17,7 +17,8 @@ struct Styling {
     button: button::State,
     slider: slider::State,
     slider_value: f32,
-    toggle_value: bool,
+    checkbox_value: bool,
+    toggler_value: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -27,6 +28,7 @@ enum Message {
     ButtonPressed,
     SliderChanged(f32),
     CheckboxToggled(bool),
+    TogglerToggled(bool),
 }
 
 impl Sandbox for Styling {
@@ -44,9 +46,10 @@ impl Sandbox for Styling {
         match message {
             Message::ThemeChanged(theme) => self.theme = theme,
             Message::InputChanged(value) => self.input_value = value,
-            Message::ButtonPressed => (),
+            Message::ButtonPressed => {}
             Message::SliderChanged(value) => self.slider_value = value,
-            Message::CheckboxToggled(value) => self.toggle_value = value,
+            Message::CheckboxToggled(value) => self.checkbox_value = value,
+            Message::TogglerToggled(value) => self.toggler_value = value,
         }
     }
 
@@ -57,7 +60,7 @@ impl Sandbox for Styling {
                 column.push(
                     Radio::new(
                         *theme,
-                        &format!("{:?}", theme),
+                        format!("{:?}", theme),
                         Some(self.theme),
                         Message::ThemeChanged,
                     )
@@ -101,11 +104,19 @@ impl Sandbox for Styling {
             .push(Text::new("You did it!"));
 
         let checkbox = Checkbox::new(
-            self.toggle_value,
-            "Toggle me!",
+            self.checkbox_value,
+            "Check me!",
             Message::CheckboxToggled,
         )
-        .width(Length::Fill)
+        .style(self.theme);
+
+        let toggler = Toggler::new(
+            self.toggler_value,
+            String::from("Toggle me!"),
+            Message::TogglerToggled,
+        )
+        .width(Length::Shrink)
+        .spacing(10)
         .style(self.theme);
 
         let content = Column::new()
@@ -121,10 +132,16 @@ impl Sandbox for Styling {
                 Row::new()
                     .spacing(10)
                     .height(Length::Units(100))
-                    .align_items(Align::Center)
+                    .align_items(Alignment::Center)
                     .push(scrollable)
                     .push(Rule::vertical(38).style(self.theme))
-                    .push(checkbox),
+                    .push(
+                        Column::new()
+                            .width(Length::Shrink)
+                            .spacing(20)
+                            .push(checkbox)
+                            .push(toggler),
+                    ),
             );
 
         Container::new(content)
@@ -140,7 +157,7 @@ impl Sandbox for Styling {
 mod style {
     use iced::{
         button, checkbox, container, progress_bar, radio, rule, scrollable,
-        slider, text_input,
+        slider, text_input, toggler,
     };
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -159,7 +176,7 @@ mod style {
         }
     }
 
-    impl From<Theme> for Box<dyn container::StyleSheet> {
+    impl<'a> From<Theme> for Box<dyn container::StyleSheet + 'a> {
         fn from(theme: Theme) -> Self {
             match theme {
                 Theme::Light => Default::default(),
@@ -168,7 +185,7 @@ mod style {
         }
     }
 
-    impl From<Theme> for Box<dyn radio::StyleSheet> {
+    impl<'a> From<Theme> for Box<dyn radio::StyleSheet + 'a> {
         fn from(theme: Theme) -> Self {
             match theme {
                 Theme::Light => Default::default(),
@@ -177,7 +194,7 @@ mod style {
         }
     }
 
-    impl From<Theme> for Box<dyn text_input::StyleSheet> {
+    impl<'a> From<Theme> for Box<dyn text_input::StyleSheet + 'a> {
         fn from(theme: Theme) -> Self {
             match theme {
                 Theme::Light => Default::default(),
@@ -186,7 +203,7 @@ mod style {
         }
     }
 
-    impl From<Theme> for Box<dyn button::StyleSheet> {
+    impl<'a> From<Theme> for Box<dyn button::StyleSheet + 'a> {
         fn from(theme: Theme) -> Self {
             match theme {
                 Theme::Light => light::Button.into(),
@@ -195,7 +212,7 @@ mod style {
         }
     }
 
-    impl From<Theme> for Box<dyn scrollable::StyleSheet> {
+    impl<'a> From<Theme> for Box<dyn scrollable::StyleSheet + 'a> {
         fn from(theme: Theme) -> Self {
             match theme {
                 Theme::Light => Default::default(),
@@ -204,7 +221,7 @@ mod style {
         }
     }
 
-    impl From<Theme> for Box<dyn slider::StyleSheet> {
+    impl<'a> From<Theme> for Box<dyn slider::StyleSheet + 'a> {
         fn from(theme: Theme) -> Self {
             match theme {
                 Theme::Light => Default::default(),
@@ -222,11 +239,20 @@ mod style {
         }
     }
 
-    impl From<Theme> for Box<dyn checkbox::StyleSheet> {
+    impl<'a> From<Theme> for Box<dyn checkbox::StyleSheet + 'a> {
         fn from(theme: Theme) -> Self {
             match theme {
                 Theme::Light => Default::default(),
                 Theme::Dark => dark::Checkbox.into(),
+            }
+        }
+    }
+
+    impl From<Theme> for Box<dyn toggler::StyleSheet> {
+        fn from(theme: Theme) -> Self {
+            match theme {
+                Theme::Light => Default::default(),
+                Theme::Dark => dark::Toggler.into(),
             }
         }
     }
@@ -269,7 +295,7 @@ mod style {
     mod dark {
         use iced::{
             button, checkbox, container, progress_bar, radio, rule, scrollable,
-            slider, text_input, Color,
+            slider, text_input, toggler, Color,
         };
 
         const SURFACE: Color = Color::from_rgb(
@@ -502,6 +528,7 @@ mod style {
                     background: if is_checked { ACTIVE } else { SURFACE }
                         .into(),
                     checkmark_color: Color::WHITE,
+                    text_color: Color::BLACK,
                     border_radius: 2.0,
                     border_width: 1.0,
                     border_color: ACTIVE,
@@ -516,6 +543,35 @@ mod style {
                     }
                     .into(),
                     ..self.active(is_checked)
+                }
+            }
+        }
+
+        pub struct Toggler;
+
+        impl toggler::StyleSheet for Toggler {
+            fn active(&self, is_active: bool) -> toggler::Style {
+                toggler::Style {
+                    background: if is_active { ACTIVE } else { SURFACE },
+                    background_border: None,
+                    foreground: if is_active { Color::WHITE } else { ACTIVE },
+                    foreground_border: None,
+                }
+            }
+
+            fn hovered(&self, is_active: bool) -> toggler::Style {
+                toggler::Style {
+                    background: if is_active { ACTIVE } else { SURFACE },
+                    background_border: None,
+                    foreground: if is_active {
+                        Color {
+                            a: 0.5,
+                            ..Color::WHITE
+                        }
+                    } else {
+                        Color { a: 0.5, ..ACTIVE }
+                    },
+                    foreground_border: None,
                 }
             }
         }

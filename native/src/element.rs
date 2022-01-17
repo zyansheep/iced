@@ -1,8 +1,10 @@
 use crate::event::{self, Event};
 use crate::layout;
+use crate::mouse;
 use crate::overlay;
+use crate::renderer;
 use crate::{
-    Clipboard, Color, Hasher, Layout, Length, Point, Rectangle, Widget,
+    Clipboard, Color, Hasher, Layout, Length, Point, Rectangle, Shell, Widget,
 };
 
 /// A generic [`Widget`].
@@ -77,7 +79,7 @@ where
     ///
     /// ```
     /// # mod counter {
-    /// #     type Text = iced_native::Text<iced_native::renderer::Null>;
+    /// #     type Text = iced_native::widget::Text<iced_native::renderer::Null>;
     /// #
     /// #     #[derive(Debug, Clone, Copy)]
     /// #     pub enum Message {}
@@ -104,7 +106,8 @@ where
     /// # pub enum Message {
     /// #    Counter(usize, counter::Message)
     /// # }
-    /// use iced_native::{Element, Row};
+    /// use iced_native::Element;
+    /// use iced_native::widget::Row;
     /// use iced_wgpu::Renderer;
     ///
     /// impl ManyCounters {
@@ -189,7 +192,7 @@ where
     ) -> Element<'a, Message, Renderer>
     where
         Message: 'static,
-        Renderer: 'a + layout::Debugger,
+        Renderer: 'a,
     {
         Element {
             widget: Box::new(Explain::new(self, color.into())),
@@ -225,7 +228,7 @@ where
         cursor_position: Point,
         renderer: &Renderer,
         clipboard: &mut dyn Clipboard,
-        messages: &mut Vec<Message>,
+        shell: &mut Shell<'_, Message>,
     ) -> event::Status {
         self.widget.on_event(
             event,
@@ -233,7 +236,7 @@ where
             cursor_position,
             renderer,
             clipboard,
-            messages,
+            shell,
         )
     }
 
@@ -241,13 +244,29 @@ where
     pub fn draw(
         &self,
         renderer: &mut Renderer,
-        defaults: &Renderer::Defaults,
+        style: &renderer::Style,
         layout: Layout<'_>,
         cursor_position: Point,
         viewport: &Rectangle,
-    ) -> Renderer::Output {
+    ) {
         self.widget
-            .draw(renderer, defaults, layout, cursor_position, viewport)
+            .draw(renderer, style, layout, cursor_position, viewport)
+    }
+
+    /// Returns the current [`mouse::Interaction`] of the [`Element`].
+    pub fn mouse_interaction(
+        &self,
+        layout: Layout<'_>,
+        cursor_position: Point,
+        viewport: &Rectangle,
+        renderer: &Renderer,
+    ) -> mouse::Interaction {
+        self.widget.mouse_interaction(
+            layout,
+            cursor_position,
+            viewport,
+            renderer,
+        )
     }
 
     /// Computes the _layout_ hash of the [`Element`].
@@ -259,8 +278,9 @@ where
     pub fn overlay<'b>(
         &'b mut self,
         layout: Layout<'_>,
+        renderer: &Renderer,
     ) -> Option<overlay::Element<'b, Message, Renderer>> {
-        self.widget.overlay(layout)
+        self.widget.overlay(layout, renderer)
     }
 }
 
@@ -313,9 +333,10 @@ where
         cursor_position: Point,
         renderer: &Renderer,
         clipboard: &mut dyn Clipboard,
-        messages: &mut Vec<B>,
+        shell: &mut Shell<'_, B>,
     ) -> event::Status {
-        let mut original_messages = Vec::new();
+        let mut local_messages = Vec::new();
+        let mut local_shell = Shell::new(&mut local_messages);
 
         let status = self.widget.on_event(
             event,
@@ -323,12 +344,10 @@ where
             cursor_position,
             renderer,
             clipboard,
-            &mut original_messages,
+            &mut local_shell,
         );
 
-        original_messages
-            .drain(..)
-            .for_each(|message| messages.push((self.mapper)(message)));
+        shell.merge(local_shell, &self.mapper);
 
         status
     }
@@ -336,13 +355,28 @@ where
     fn draw(
         &self,
         renderer: &mut Renderer,
-        defaults: &Renderer::Defaults,
+        style: &renderer::Style,
         layout: Layout<'_>,
         cursor_position: Point,
         viewport: &Rectangle,
-    ) -> Renderer::Output {
+    ) {
         self.widget
-            .draw(renderer, defaults, layout, cursor_position, viewport)
+            .draw(renderer, style, layout, cursor_position, viewport)
+    }
+
+    fn mouse_interaction(
+        &self,
+        layout: Layout<'_>,
+        cursor_position: Point,
+        viewport: &Rectangle,
+        renderer: &Renderer,
+    ) -> mouse::Interaction {
+        self.widget.mouse_interaction(
+            layout,
+            cursor_position,
+            viewport,
+            renderer,
+        )
     }
 
     fn hash_layout(&self, state: &mut Hasher) {
@@ -352,11 +386,12 @@ where
     fn overlay(
         &mut self,
         layout: Layout<'_>,
+        renderer: &Renderer,
     ) -> Option<overlay::Element<'_, B, Renderer>> {
         let mapper = &self.mapper;
 
         self.widget
-            .overlay(layout)
+            .overlay(layout, renderer)
             .map(move |overlay| overlay.map(mapper))
     }
 }
@@ -378,7 +413,7 @@ where
 impl<'a, Message, Renderer> Widget<Message, Renderer>
     for Explain<'a, Message, Renderer>
 where
-    Renderer: crate::Renderer + layout::Debugger,
+    Renderer: crate::Renderer,
 {
     fn width(&self) -> Length {
         self.element.widget.width()
@@ -403,7 +438,7 @@ where
         cursor_position: Point,
         renderer: &Renderer,
         clipboard: &mut dyn Clipboard,
-        messages: &mut Vec<Message>,
+        shell: &mut Shell<'_, Message>,
     ) -> event::Status {
         self.element.widget.on_event(
             event,
@@ -411,25 +446,61 @@ where
             cursor_position,
             renderer,
             clipboard,
-            messages,
+            shell,
         )
     }
 
     fn draw(
         &self,
         renderer: &mut Renderer,
-        defaults: &Renderer::Defaults,
+        style: &renderer::Style,
         layout: Layout<'_>,
         cursor_position: Point,
         viewport: &Rectangle,
-    ) -> Renderer::Output {
-        renderer.explain(
-            defaults,
-            self.element.widget.as_ref(),
+    ) {
+        fn explain_layout<Renderer: crate::Renderer>(
+            renderer: &mut Renderer,
+            color: Color,
+            layout: Layout<'_>,
+        ) {
+            renderer.fill_quad(
+                renderer::Quad {
+                    bounds: layout.bounds(),
+                    border_color: color,
+                    border_width: 1.0,
+                    border_radius: 0.0,
+                },
+                Color::TRANSPARENT,
+            );
+
+            for child in layout.children() {
+                explain_layout(renderer, color, child);
+            }
+        }
+
+        self.element.widget.draw(
+            renderer,
+            style,
             layout,
             cursor_position,
             viewport,
-            self.color,
+        );
+
+        explain_layout(renderer, self.color, layout);
+    }
+
+    fn mouse_interaction(
+        &self,
+        layout: Layout<'_>,
+        cursor_position: Point,
+        viewport: &Rectangle,
+        renderer: &Renderer,
+    ) -> mouse::Interaction {
+        self.element.widget.mouse_interaction(
+            layout,
+            cursor_position,
+            viewport,
+            renderer,
         )
     }
 
@@ -440,7 +511,8 @@ where
     fn overlay(
         &mut self,
         layout: Layout<'_>,
+        renderer: &Renderer,
     ) -> Option<overlay::Element<'_, Message, Renderer>> {
-        self.element.overlay(layout)
+        self.element.overlay(layout, renderer)
     }
 }

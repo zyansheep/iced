@@ -3,7 +3,6 @@ use crate::{Backend, Color, Error, Renderer, Settings, Viewport};
 use core::ffi::c_void;
 use glow::HasContext;
 use iced_graphics::{Antialiasing, Size};
-use iced_native::mouse;
 
 /// A window graphics backend for iced powered by `glow`.
 #[allow(missing_debug_implementations)]
@@ -26,7 +25,12 @@ impl iced_graphics::window::GLCompositor for Compositor {
 
         // Enable alpha blending
         gl.enable(glow::BLEND);
-        gl.blend_func(glow::SRC_ALPHA, glow::ONE_MINUS_SRC_ALPHA);
+        gl.blend_func_separate(
+            glow::SRC_ALPHA,
+            glow::ONE_MINUS_SRC_ALPHA,
+            glow::ONE,
+            glow::ONE_MINUS_SRC_ALPHA,
+        );
 
         // Disable multisampling by default
         gl.disable(glow::MULTISAMPLE);
@@ -54,14 +58,13 @@ impl iced_graphics::window::GLCompositor for Compositor {
         }
     }
 
-    fn draw<T: AsRef<str>>(
+    fn present<T: AsRef<str>>(
         &mut self,
         renderer: &mut Self::Renderer,
         viewport: &Viewport,
         color: Color,
-        output: &<Self::Renderer as iced_native::Renderer>::Output,
         overlay: &[T],
-    ) -> mouse::Interaction {
+    ) {
         let gl = &self.gl;
 
         let [r, g, b, a] = color.into_linear();
@@ -71,6 +74,8 @@ impl iced_graphics::window::GLCompositor for Compositor {
             gl.clear(glow::COLOR_BUFFER_BIT);
         }
 
-        renderer.backend_mut().draw(gl, viewport, output, overlay)
+        renderer.with_primitives(|backend, primitive| {
+            backend.present(gl, primitive, viewport, overlay);
+        });
     }
 }

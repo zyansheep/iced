@@ -1,10 +1,10 @@
 //! Organize rendering primitives into a flattened list of layers.
+use crate::alignment;
 use crate::image;
 use crate::svg;
 use crate::triangle;
 use crate::{
-    Background, Font, HorizontalAlignment, Point, Primitive, Rectangle, Size,
-    Vector, VerticalAlignment, Viewport,
+    Background, Font, Point, Primitive, Rectangle, Size, Vector, Viewport,
 };
 
 /// A group of primitives that should be clipped together.
@@ -55,8 +55,8 @@ impl<'a> Layer<'a> {
                 color: [0.9, 0.9, 0.9, 1.0],
                 size: 20.0,
                 font: Font::Default,
-                horizontal_alignment: HorizontalAlignment::Left,
-                vertical_alignment: VerticalAlignment::Top,
+                horizontal_alignment: alignment::Horizontal::Left,
+                vertical_alignment: alignment::Vertical::Top,
             };
 
             overlay.text.push(text);
@@ -74,7 +74,7 @@ impl<'a> Layer<'a> {
     /// Distributes the given [`Primitive`] and generates a list of layers based
     /// on its contents.
     pub fn generate(
-        primitive: &'a Primitive,
+        primitives: &'a [Primitive],
         viewport: &Viewport,
     ) -> Vec<Self> {
         let first_layer =
@@ -82,12 +82,14 @@ impl<'a> Layer<'a> {
 
         let mut layers = vec![first_layer];
 
-        Self::process_primitive(
-            &mut layers,
-            Vector::new(0.0, 0.0),
-            primitive,
-            0,
-        );
+        for primitive in primitives {
+            Self::process_primitive(
+                &mut layers,
+                Vector::new(0.0, 0.0),
+                primitive,
+                0,
+            );
+        }
 
         layers
     }
@@ -173,11 +175,7 @@ impl<'a> Layer<'a> {
                     });
                 }
             }
-            Primitive::Clip {
-                bounds,
-                offset,
-                content,
-            } => {
+            Primitive::Clip { bounds, content } => {
                 let layer = &mut layers[current_layer];
                 let translated_bounds = *bounds + translation;
 
@@ -190,8 +188,7 @@ impl<'a> Layer<'a> {
 
                     Self::process_primitive(
                         layers,
-                        translation
-                            - Vector::new(offset.x as f32, offset.y as f32),
+                        translation,
                         content,
                         layers.len() - 1,
                     );
@@ -293,10 +290,10 @@ pub struct Text<'a> {
     pub font: Font,
 
     /// The horizontal alignment of the [`Text`].
-    pub horizontal_alignment: HorizontalAlignment,
+    pub horizontal_alignment: alignment::Horizontal,
 
     /// The vertical alignment of the [`Text`].
-    pub vertical_alignment: VerticalAlignment,
+    pub vertical_alignment: alignment::Vertical,
 }
 
 /// A raster or vector image.
