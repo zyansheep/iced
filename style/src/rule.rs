@@ -1,5 +1,4 @@
 //! Display a horizontal or vertical rule for dividing content.
-
 use iced_core::Color;
 
 /// The fill mode of a rule.
@@ -79,6 +78,17 @@ pub struct Style {
     pub fill_mode: FillMode,
 }
 
+impl std::default::Default for Style {
+    fn default() -> Self {
+        Style {
+            color: [0.6, 0.6, 0.6, 0.6].into(),
+            width: 1,
+            radius: 0.0,
+            fill_mode: FillMode::Full,
+        }
+    }
+}
+
 /// A set of rules that dictate the style of a rule.
 pub trait StyleSheet {
     /// Produces the style of a rule.
@@ -89,24 +99,19 @@ struct Default;
 
 impl StyleSheet for Default {
     fn style(&self) -> Style {
-        Style {
-            color: [0.6, 0.6, 0.6, 0.51].into(),
-            width: 1,
-            radius: 0.0,
-            fill_mode: FillMode::Percent(90.0),
-        }
+        Style::default()
     }
 }
 
-impl std::default::Default for Box<dyn StyleSheet> {
+impl<'a> std::default::Default for Box<dyn StyleSheet + 'a> {
     fn default() -> Self {
         Box::new(Default)
     }
 }
 
-impl<T> From<T> for Box<dyn StyleSheet>
+impl<'a, T> From<T> for Box<dyn StyleSheet + 'a>
 where
-    T: 'static + StyleSheet,
+    T: 'a + StyleSheet,
 {
     fn from(style: T) -> Self {
         Box::new(style)

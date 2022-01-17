@@ -20,7 +20,7 @@ opengl = []
 
 [dependencies]
 glam = "0.10"
-raw-window-handle = "0.3"
+raw-window-handle = "0.4"
 thiserror = "1.0"
 
 [dependencies.bytemuck]
@@ -36,7 +36,7 @@ version = "0.3"
 path = "../style"
 
 [dependencies.lyon]
-version = "0.16"
+version = "0.17"
 optional = true
 
 [dependencies.qrcode]

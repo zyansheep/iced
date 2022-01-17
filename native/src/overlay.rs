@@ -8,7 +8,9 @@ pub use menu::Menu;
 
 use crate::event::{self, Event};
 use crate::layout;
-use crate::{Clipboard, Hasher, Layout, Point, Size};
+use crate::mouse;
+use crate::renderer;
+use crate::{Clipboard, Hasher, Layout, Point, Rectangle, Shell, Size};
 
 /// An interactive component that can be displayed on top of other widgets.
 pub trait Overlay<Message, Renderer>
@@ -32,10 +34,10 @@ where
     fn draw(
         &self,
         renderer: &mut Renderer,
-        defaults: &Renderer::Defaults,
+        style: &renderer::Style,
         layout: Layout<'_>,
         cursor_position: Point,
-    ) -> Renderer::Output;
+    );
 
     /// Computes the _layout_ hash of the [`Overlay`].
     ///
@@ -69,8 +71,21 @@ where
         _cursor_position: Point,
         _renderer: &Renderer,
         _clipboard: &mut dyn Clipboard,
-        _messages: &mut Vec<Message>,
+        _shell: &mut Shell<'_, Message>,
     ) -> event::Status {
         event::Status::Ignored
+    }
+
+    /// Returns the current [`mouse::Interaction`] of the [`Widget`].
+    ///
+    /// By default, it returns [`mouse::Interaction::Idle`].
+    fn mouse_interaction(
+        &self,
+        _layout: Layout<'_>,
+        _cursor_position: Point,
+        _viewport: &Rectangle,
+        _renderer: &Renderer,
+    ) -> mouse::Interaction {
+        mouse::Interaction::Idle
     }
 }

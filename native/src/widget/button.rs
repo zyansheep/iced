@@ -5,19 +5,24 @@ use crate::event::{self, Event};
 use crate::layout;
 use crate::mouse;
 use crate::overlay;
+use crate::renderer;
 use crate::touch;
 use crate::{
-    Clipboard, Element, Hasher, Layout, Length, Point, Rectangle, Widget,
+    Background, Clipboard, Color, Element, Hasher, Layout, Length, Padding,
+    Point, Rectangle, Shell, Vector, Widget,
 };
+
 use std::hash::Hash;
+
+pub use iced_style::button::{Style, StyleSheet};
 
 /// A generic widget that produces a message when pressed.
 ///
 /// ```
-/// # use iced_native::{button, Text};
+/// # use iced_native::widget::{button, Text};
 /// #
 /// # type Button<'a, Message> =
-/// #     iced_native::Button<'a, Message, iced_native::renderer::Null>;
+/// #     iced_native::widget::Button<'a, Message, iced_native::renderer::Null>;
 /// #
 /// #[derive(Clone)]
 /// enum Message {
@@ -28,8 +33,31 @@ use std::hash::Hash;
 /// let button = Button::new(&mut state, Text::new("Press me!"))
 ///     .on_press(Message::ButtonPressed);
 /// ```
+///
+/// If a [`Button::on_press`] handler is not set, the resulting [`Button`] will
+/// be disabled:
+///
+/// ```
+/// # use iced_native::widget::{button, Text};
+/// #
+/// # type Button<'a, Message> =
+/// #     iced_native::widget::Button<'a, Message, iced_native::renderer::Null>;
+/// #
+/// #[derive(Clone)]
+/// enum Message {
+///     ButtonPressed,
+/// }
+///
+/// fn disabled_button(state: &mut button::State) -> Button<'_, Message> {
+///     Button::new(state, Text::new("I'm disabled!"))
+/// }
+///
+/// fn enabled_button(state: &mut button::State) -> Button<'_, Message> {
+///     disabled_button(state).on_press(Message::ButtonPressed)
+/// }
+/// ```
 #[allow(missing_debug_implementations)]
-pub struct Button<'a, Message, Renderer: self::Renderer> {
+pub struct Button<'a, Message, Renderer> {
     state: &'a mut State,
     content: Element<'a, Message, Renderer>,
     on_press: Option<Message>,
@@ -37,14 +65,14 @@ pub struct Button<'a, Message, Renderer: self::Renderer> {
     height: Length,
     min_width: u32,
     min_height: u32,
-    padding: u16,
-    style: Renderer::Style,
+    padding: Padding,
+    style_sheet: Box<dyn StyleSheet + 'a>,
 }
 
 impl<'a, Message, Renderer> Button<'a, Message, Renderer>
 where
     Message: Clone,
-    Renderer: self::Renderer,
+    Renderer: crate::Renderer,
 {
     /// Creates a new [`Button`] with some local [`State`] and the given
     /// content.
@@ -60,8 +88,8 @@ where
             height: Length::Shrink,
             min_width: 0,
             min_height: 0,
-            padding: Renderer::DEFAULT_PADDING,
-            style: Renderer::Style::default(),
+            padding: Padding::new(5),
+            style_sheet: Default::default(),
         }
     }
 
@@ -89,21 +117,25 @@ where
         self
     }
 
-    /// Sets the padding of the [`Button`].
-    pub fn padding(mut self, padding: u16) -> Self {
-        self.padding = padding;
+    /// Sets the [`Padding`] of the [`Button`].
+    pub fn padding<P: Into<Padding>>(mut self, padding: P) -> Self {
+        self.padding = padding.into();
         self
     }
 
     /// Sets the message that will be produced when the [`Button`] is pressed.
+    /// If on_press isn't set, button will be disabled.
     pub fn on_press(mut self, msg: Message) -> Self {
         self.on_press = Some(msg);
         self
     }
 
     /// Sets the style of the [`Button`].
-    pub fn style(mut self, style: impl Into<Renderer::Style>) -> Self {
-        self.style = style.into();
+    pub fn style(
+        mut self,
+        style_sheet: impl Into<Box<dyn StyleSheet + 'a>>,
+    ) -> Self {
+        self.style_sheet = style_sheet.into();
         self
     }
 }
@@ -125,7 +157,7 @@ impl<'a, Message, Renderer> Widget<Message, Renderer>
     for Button<'a, Message, Renderer>
 where
     Message: Clone,
-    Renderer: self::Renderer,
+    Renderer: crate::Renderer,
 {
     fn width(&self) -> Length {
         self.width
@@ -140,18 +172,20 @@ where
         renderer: &Renderer,
         limits: &layout::Limits,
     ) -> layout::Node {
-        let padding = f32::from(self.padding);
         let limits = limits
             .min_width(self.min_width)
             .min_height(self.min_height)
             .width(self.width)
             .height(self.height)
-            .pad(padding);
+            .pad(self.padding);
 
         let mut content = self.content.layout(renderer, &limits);
-        content.move_to(Point::new(padding, padding));
+        content.move_to(Point::new(
+            self.padding.left.into(),
+            self.padding.top.into(),
+        ));
 
-        let size = limits.resolve(content.size()).pad(padding);
+        let size = limits.resolve(content.size()).pad(self.padding);
 
         layout::Node::with_children(size, vec![content])
     }
@@ -163,7 +197,7 @@ where
         cursor_position: Point,
         renderer: &Renderer,
         clipboard: &mut dyn Clipboard,
-        messages: &mut Vec<Message>,
+        shell: &mut Shell<'_, Message>,
     ) -> event::Status {
         if let event::Status::Captured = self.content.on_event(
             event.clone(),
@@ -171,7 +205,7 @@ where
             cursor_position,
             renderer,
             clipboard,
-            messages,
+            shell,
         ) {
             return event::Status::Captured;
         }
@@ -198,7 +232,7 @@ where
                         self.state.is_pressed = false;
 
                         if bounds.contains(cursor_position) {
-                            messages.push(on_press);
+                            shell.publish(on_press);
                         }
 
                         return event::Status::Captured;
@@ -214,24 +248,89 @@ where
         event::Status::Ignored
     }
 
-    fn draw(
+    fn mouse_interaction(
         &self,
-        renderer: &mut Renderer,
-        defaults: &Renderer::Defaults,
         layout: Layout<'_>,
         cursor_position: Point,
         _viewport: &Rectangle,
-    ) -> Renderer::Output {
-        renderer.draw(
-            defaults,
-            layout.bounds(),
+        _renderer: &Renderer,
+    ) -> mouse::Interaction {
+        let is_mouse_over = layout.bounds().contains(cursor_position);
+        let is_disabled = self.on_press.is_none();
+
+        if is_mouse_over && !is_disabled {
+            mouse::Interaction::Pointer
+        } else {
+            mouse::Interaction::default()
+        }
+    }
+
+    fn draw(
+        &self,
+        renderer: &mut Renderer,
+        _style: &renderer::Style,
+        layout: Layout<'_>,
+        cursor_position: Point,
+        _viewport: &Rectangle,
+    ) {
+        let bounds = layout.bounds();
+        let content_layout = layout.children().next().unwrap();
+
+        let is_mouse_over = bounds.contains(cursor_position);
+        let is_disabled = self.on_press.is_none();
+
+        let styling = if is_disabled {
+            self.style_sheet.disabled()
+        } else if is_mouse_over {
+            if self.state.is_pressed {
+                self.style_sheet.pressed()
+            } else {
+                self.style_sheet.hovered()
+            }
+        } else {
+            self.style_sheet.active()
+        };
+
+        if styling.background.is_some() || styling.border_width > 0.0 {
+            if styling.shadow_offset != Vector::default() {
+                // TODO: Implement proper shadow support
+                renderer.fill_quad(
+                    renderer::Quad {
+                        bounds: Rectangle {
+                            x: bounds.x + styling.shadow_offset.x,
+                            y: bounds.y + styling.shadow_offset.y,
+                            ..bounds
+                        },
+                        border_radius: styling.border_radius,
+                        border_width: 0.0,
+                        border_color: Color::TRANSPARENT,
+                    },
+                    Background::Color([0.0, 0.0, 0.0, 0.5].into()),
+                );
+            }
+
+            renderer.fill_quad(
+                renderer::Quad {
+                    bounds,
+                    border_radius: styling.border_radius,
+                    border_width: styling.border_width,
+                    border_color: styling.border_color,
+                },
+                styling
+                    .background
+                    .unwrap_or(Background::Color(Color::TRANSPARENT)),
+            );
+        }
+
+        self.content.draw(
+            renderer,
+            &renderer::Style {
+                text_color: styling.text_color,
+            },
+            content_layout,
             cursor_position,
-            self.on_press.is_none(),
-            self.state.is_pressed,
-            &self.style,
-            &self.content,
-            layout.children().next().unwrap(),
-        )
+            &bounds,
+        );
     }
 
     fn hash_layout(&self, state: &mut Hasher) {
@@ -245,43 +344,18 @@ where
     fn overlay(
         &mut self,
         layout: Layout<'_>,
+        renderer: &Renderer,
     ) -> Option<overlay::Element<'_, Message, Renderer>> {
-        self.content.overlay(layout.children().next().unwrap())
+        self.content
+            .overlay(layout.children().next().unwrap(), renderer)
     }
-}
-
-/// The renderer of a [`Button`].
-///
-/// Your [renderer] will need to implement this trait before being
-/// able to use a [`Button`] in your user interface.
-///
-/// [renderer]: crate::renderer
-pub trait Renderer: crate::Renderer + Sized {
-    /// The default padding of a [`Button`].
-    const DEFAULT_PADDING: u16;
-
-    /// The style supported by this renderer.
-    type Style: Default;
-
-    /// Draws a [`Button`].
-    fn draw<Message>(
-        &mut self,
-        defaults: &Self::Defaults,
-        bounds: Rectangle,
-        cursor_position: Point,
-        is_disabled: bool,
-        is_pressed: bool,
-        style: &Self::Style,
-        content: &Element<'_, Message, Self>,
-        content_layout: Layout<'_>,
-    ) -> Self::Output;
 }
 
 impl<'a, Message, Renderer> From<Button<'a, Message, Renderer>>
     for Element<'a, Message, Renderer>
 where
     Message: 'a + Clone,
-    Renderer: 'a + self::Renderer,
+    Renderer: 'a + crate::Renderer,
 {
     fn from(
         button: Button<'a, Message, Renderer>,

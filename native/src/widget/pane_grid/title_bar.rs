@@ -1,24 +1,28 @@
-use crate::container;
 use crate::event::{self, Event};
 use crate::layout;
-use crate::pane_grid;
-use crate::{Clipboard, Element, Hasher, Layout, Point, Rectangle, Size};
+use crate::mouse;
+use crate::overlay;
+use crate::renderer;
+use crate::widget::container;
+use crate::{
+    Clipboard, Element, Hasher, Layout, Padding, Point, Rectangle, Shell, Size,
+};
 
 /// The title bar of a [`Pane`].
 ///
 /// [`Pane`]: crate::widget::pane_grid::Pane
 #[allow(missing_debug_implementations)]
-pub struct TitleBar<'a, Message, Renderer: pane_grid::Renderer> {
+pub struct TitleBar<'a, Message, Renderer> {
     content: Element<'a, Message, Renderer>,
     controls: Option<Element<'a, Message, Renderer>>,
-    padding: u16,
+    padding: Padding,
     always_show_controls: bool,
-    style: <Renderer as container::Renderer>::Style,
+    style_sheet: Box<dyn container::StyleSheet + 'a>,
 }
 
 impl<'a, Message, Renderer> TitleBar<'a, Message, Renderer>
 where
-    Renderer: pane_grid::Renderer,
+    Renderer: crate::Renderer,
 {
     /// Creates a new [`TitleBar`] with the given content.
     pub fn new<E>(content: E) -> Self
@@ -28,9 +32,9 @@ where
         Self {
             content: content.into(),
             controls: None,
-            padding: 0,
+            padding: Padding::ZERO,
             always_show_controls: false,
-            style: Default::default(),
+            style_sheet: Default::default(),
         }
     }
 
@@ -43,18 +47,18 @@ where
         self
     }
 
-    /// Sets the padding of the [`TitleBar`].
-    pub fn padding(mut self, units: u16) -> Self {
-        self.padding = units;
+    /// Sets the [`Padding`] of the [`TitleBar`].
+    pub fn padding<P: Into<Padding>>(mut self, padding: P) -> Self {
+        self.padding = padding.into();
         self
     }
 
     /// Sets the style of the [`TitleBar`].
     pub fn style(
         mut self,
-        style: impl Into<<Renderer as container::Renderer>::Style>,
+        style: impl Into<Box<dyn container::StyleSheet + 'a>>,
     ) -> Self {
-        self.style = style.into();
+        self.style_sheet = style.into();
         self
     }
 
@@ -74,7 +78,7 @@ where
 
 impl<'a, Message, Renderer> TitleBar<'a, Message, Renderer>
 where
-    Renderer: pane_grid::Renderer,
+    Renderer: crate::Renderer,
 {
     /// Draws the [`TitleBar`] with the provided [`Renderer`] and [`Layout`].
     ///
@@ -82,39 +86,47 @@ where
     pub fn draw(
         &self,
         renderer: &mut Renderer,
-        defaults: &Renderer::Defaults,
+        inherited_style: &renderer::Style,
         layout: Layout<'_>,
         cursor_position: Point,
         viewport: &Rectangle,
         show_controls: bool,
-    ) -> Renderer::Output {
+    ) {
+        let bounds = layout.bounds();
+        let style = self.style_sheet.style();
+        let inherited_style = renderer::Style {
+            text_color: style.text_color.unwrap_or(inherited_style.text_color),
+        };
+
+        container::draw_background(renderer, &style, bounds);
+
         let mut children = layout.children();
         let padded = children.next().unwrap();
 
         let mut children = padded.children();
         let title_layout = children.next().unwrap();
 
-        let controls = if let Some(controls) = &self.controls {
+        self.content.draw(
+            renderer,
+            &inherited_style,
+            title_layout,
+            cursor_position,
+            viewport,
+        );
+
+        if let Some(controls) = &self.controls {
             let controls_layout = children.next().unwrap();
 
             if show_controls || self.always_show_controls {
-                Some((controls, controls_layout))
-            } else {
-                None
+                controls.draw(
+                    renderer,
+                    &inherited_style,
+                    controls_layout,
+                    cursor_position,
+                    viewport,
+                );
             }
-        } else {
-            None
-        };
-
-        renderer.draw_title_bar(
-            defaults,
-            layout.bounds(),
-            &self.style,
-            (&self.content, title_layout),
-            controls,
-            cursor_position,
-            viewport,
-        )
+        }
     }
 
     /// Returns whether the mouse cursor is over the pick area of the
@@ -129,15 +141,16 @@ where
         if layout.bounds().contains(cursor_position) {
             let mut children = layout.children();
             let padded = children.next().unwrap();
+            let mut children = padded.children();
+            let title_layout = children.next().unwrap();
 
             if self.controls.is_some() {
-                let mut children = padded.children();
-                let _ = children.next().unwrap();
                 let controls_layout = children.next().unwrap();
 
                 !controls_layout.bounds().contains(cursor_position)
+                    && !title_layout.bounds().contains(cursor_position)
             } else {
-                true
+                !title_layout.bounds().contains(cursor_position)
             }
         } else {
             false
@@ -160,8 +173,7 @@ where
         renderer: &Renderer,
         limits: &layout::Limits,
     ) -> layout::Node {
-        let padding = f32::from(self.padding);
-        let limits = limits.pad(padding);
+        let limits = limits.pad(self.padding);
         let max_size = limits.max();
 
         let title_layout = self
@@ -191,9 +203,12 @@ where
             )
         };
 
-        node.move_to(Point::new(padding, padding));
+        node.move_to(Point::new(
+            self.padding.left.into(),
+            self.padding.top.into(),
+        ));
 
-        layout::Node::with_children(node.size().pad(padding), vec![node])
+        layout::Node::with_children(node.size().pad(self.padding), vec![node])
     }
 
     pub(crate) fn on_event(
@@ -203,26 +218,98 @@ where
         cursor_position: Point,
         renderer: &Renderer,
         clipboard: &mut dyn Clipboard,
-        messages: &mut Vec<Message>,
+        shell: &mut Shell<'_, Message>,
     ) -> event::Status {
-        if let Some(controls) = &mut self.controls {
-            let mut children = layout.children();
-            let padded = children.next().unwrap();
+        let mut children = layout.children();
+        let padded = children.next().unwrap();
 
-            let mut children = padded.children();
-            let _ = children.next();
+        let mut children = padded.children();
+        let title_layout = children.next().unwrap();
+
+        let control_status = if let Some(controls) = &mut self.controls {
             let controls_layout = children.next().unwrap();
 
             controls.on_event(
-                event,
+                event.clone(),
                 controls_layout,
                 cursor_position,
                 renderer,
                 clipboard,
-                messages,
+                shell,
             )
         } else {
             event::Status::Ignored
+        };
+
+        let title_status = self.content.on_event(
+            event,
+            title_layout,
+            cursor_position,
+            renderer,
+            clipboard,
+            shell,
+        );
+
+        control_status.merge(title_status)
+    }
+
+    pub(crate) fn mouse_interaction(
+        &self,
+        layout: Layout<'_>,
+        cursor_position: Point,
+        viewport: &Rectangle,
+        renderer: &Renderer,
+    ) -> mouse::Interaction {
+        let mut children = layout.children();
+        let padded = children.next().unwrap();
+
+        let mut children = padded.children();
+        let title_layout = children.next().unwrap();
+
+        let title_interaction = self.content.mouse_interaction(
+            title_layout,
+            cursor_position,
+            viewport,
+            renderer,
+        );
+
+        if let Some(controls) = &self.controls {
+            let controls_layout = children.next().unwrap();
+
+            controls
+                .mouse_interaction(
+                    controls_layout,
+                    cursor_position,
+                    viewport,
+                    renderer,
+                )
+                .max(title_interaction)
+        } else {
+            title_interaction
         }
+    }
+
+    pub(crate) fn overlay(
+        &mut self,
+        layout: Layout<'_>,
+        renderer: &Renderer,
+    ) -> Option<overlay::Element<'_, Message, Renderer>> {
+        let mut children = layout.children();
+        let padded = children.next()?;
+
+        let mut children = padded.children();
+        let title_layout = children.next()?;
+
+        let Self {
+            content, controls, ..
+        } = self;
+
+        content.overlay(title_layout, renderer).or_else(move || {
+            controls.as_mut().and_then(|controls| {
+                let controls_layout = children.next()?;
+
+                controls.overlay(controls_layout, renderer)
+            })
+        })
     }
 }

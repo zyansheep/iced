@@ -6,6 +6,7 @@ use iced_core::{Background, Color};
 pub struct Style {
     pub background: Background,
     pub checkmark_color: Color,
+    pub text_color: Color,
     pub border_radius: f32,
     pub border_width: f32,
     pub border_color: Color,
@@ -25,6 +26,7 @@ impl StyleSheet for Default {
         Style {
             background: Background::Color(Color::from_rgb(0.95, 0.95, 0.95)),
             checkmark_color: Color::from_rgb(0.3, 0.3, 0.3),
+            text_color: Color::BLACK,
             border_radius: 5.0,
             border_width: 1.0,
             border_color: Color::from_rgb(0.6, 0.6, 0.6),
@@ -39,17 +41,17 @@ impl StyleSheet for Default {
     }
 }
 
-impl std::default::Default for Box<dyn StyleSheet> {
+impl<'a> std::default::Default for Box<dyn StyleSheet + 'a> {
     fn default() -> Self {
         Box::new(Default)
     }
 }
 
-impl<T> From<T> for Box<dyn StyleSheet>
+impl<'a, T> From<T> for Box<dyn StyleSheet + 'a>
 where
-    T: 'static + StyleSheet,
+    T: StyleSheet + 'a,
 {
-    fn from(style: T) -> Self {
-        Box::new(style)
+    fn from(style_sheet: T) -> Self {
+        Box::new(style_sheet)
     }
 }

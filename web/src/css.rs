@@ -1,5 +1,6 @@
 //! Style your widgets.
-use crate::{bumpalo, Align, Background, Color, Length};
+use crate::bumpalo;
+use crate::{Alignment, Background, Color, Length, Padding};
 
 use std::collections::BTreeMap;
 
@@ -12,11 +13,11 @@ pub enum Rule {
     /// Container with horizonal distribution
     Row,
 
-    /// Padding of the container
-    Padding(u16),
-
     /// Spacing between elements
     Spacing(u16),
+
+    /// Toggler input for a specific size
+    Toggler(u16),
 }
 
 impl Rule {
@@ -25,8 +26,8 @@ impl Rule {
         match self {
             Rule::Column => String::from("c"),
             Rule::Row => String::from("r"),
-            Rule::Padding(padding) => format!("p-{}", padding),
             Rule::Spacing(spacing) => format!("s-{}", spacing),
+            Rule::Toggler(size) => format!("toggler-{}", size),
         }
     }
 
@@ -45,13 +46,6 @@ impl Rule {
 
                 bumpalo::format!(in bump, ".{} {}", class, body).into_bump_str()
             }
-            Rule::Padding(padding) => bumpalo::format!(
-                in bump,
-                ".{} {{ box-sizing: border-box; padding: {}px }}",
-                class,
-                padding
-            )
-            .into_bump_str(),
             Rule::Spacing(spacing) => bumpalo::format!(
                 in bump,
                 ".c.{} > * {{ margin-bottom: {}px }} \
@@ -64,6 +58,46 @@ impl Rule {
                 spacing,
                 class,
                 class
+            )
+            .into_bump_str(),
+            Rule::Toggler(size) => bumpalo::format!(
+                in bump,
+                ".toggler-{} {{ display: flex; cursor: pointer; justify-content: space-between; }} \
+                 .toggler-{} input {{ display:none; }} \
+                 .toggler-{} span {{ background-color: #b1b1b1; position: relative; display: inline-flex; width:{}px; height: {}px; border-radius: {}px;}} \
+                 .toggler-{} span > span {{ background-color: #FFFFFF; width: {}px; height: {}px; border-radius: 50%; top: 1px; left: 1px;}} \
+                 .toggler-{}:hover span > span {{ background-color: #f1f1f1 !important; }} \
+                 .toggler-{} input:checked + span {{ background-color: #00FF00; }} \
+                 .toggler-{} input:checked + span > span {{ -webkit-transform: translateX({}px); -ms-transform:translateX({}px); transform: translateX({}px); }}
+                ",
+                // toggler
+                size,
+
+                // toggler input
+                size,
+
+                // toggler span
+                size,
+                size*2,
+                size,
+                size,
+
+                // toggler span > span
+                size,
+                size-2,
+                size-2,
+
+                // toggler: hover + span > span
+                size,
+
+                // toggler input:checked + span
+                size,
+
+                // toggler input:checked + span > span
+                size,
+                size,
+                size,
+                size
             )
             .into_bump_str(),
         }
@@ -162,11 +196,22 @@ pub fn background(background: Background) -> String {
     }
 }
 
-/// Returns the style value for the given [`Align`].
-pub fn align(align: Align) -> &'static str {
-    match align {
-        Align::Start => "flex-start",
-        Align::Center => "center",
-        Align::End => "flex-end",
+/// Returns the style value for the given [`Alignment`].
+pub fn alignment(alignment: Alignment) -> &'static str {
+    match alignment {
+        Alignment::Start => "flex-start",
+        Alignment::Center => "center",
+        Alignment::End => "flex-end",
+        Alignment::Fill => "stretch",
     }
+}
+
+/// Returns the style value for the given [`Padding`].
+///
+/// [`Padding`]: struct.Padding.html
+pub fn padding(padding: Padding) -> String {
+    format!(
+        "{}px {}px {}px {}px",
+        padding.top, padding.right, padding.bottom, padding.left
+    )
 }

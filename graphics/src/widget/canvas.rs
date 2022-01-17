@@ -3,12 +3,14 @@
 //! A [`Canvas`] widget can be used to draw different kinds of 2D shapes in a
 //! [`Frame`]. It can be used for animation, data visualization, game graphics,
 //! and more!
-use crate::{Backend, Defaults, Primitive, Renderer};
+use crate::renderer::{self, Renderer};
+use crate::{Backend, Primitive};
+
 use iced_native::layout;
 use iced_native::mouse;
 use iced_native::{
-    Clipboard, Element, Hasher, Layout, Length, Point, Rectangle, Size, Vector,
-    Widget,
+    Clipboard, Element, Hasher, Layout, Length, Point, Rectangle, Shell, Size,
+    Vector, Widget,
 };
 use std::hash::Hash;
 use std::marker::PhantomData;
@@ -156,7 +158,7 @@ where
         cursor_position: Point,
         _renderer: &Renderer<B>,
         _clipboard: &mut dyn Clipboard,
-        messages: &mut Vec<Message>,
+        shell: &mut Shell<'_, Message>,
     ) -> event::Status {
         let bounds = layout.bounds();
 
@@ -177,7 +179,7 @@ where
                 self.program.update(canvas_event, bounds, cursor);
 
             if let Some(message) = message {
-                messages.push(message);
+                shell.publish(message);
             }
 
             return event_status;
@@ -186,32 +188,43 @@ where
         event::Status::Ignored
     }
 
-    fn draw(
+    fn mouse_interaction(
         &self,
-        _renderer: &mut Renderer<B>,
-        _defaults: &Defaults,
         layout: Layout<'_>,
         cursor_position: Point,
         _viewport: &Rectangle,
-    ) -> (Primitive, mouse::Interaction) {
+        _renderer: &Renderer<B>,
+    ) -> mouse::Interaction {
+        let bounds = layout.bounds();
+        let cursor = Cursor::from_window_position(cursor_position);
+
+        self.program.mouse_interaction(bounds, cursor)
+    }
+
+    fn draw(
+        &self,
+        renderer: &mut Renderer<B>,
+        _style: &renderer::Style,
+        layout: Layout<'_>,
+        cursor_position: Point,
+        _viewport: &Rectangle,
+    ) {
+        use iced_native::Renderer as _;
+
         let bounds = layout.bounds();
         let translation = Vector::new(bounds.x, bounds.y);
         let cursor = Cursor::from_window_position(cursor_position);
 
-        (
-            Primitive::Translate {
-                translation,
-                content: Box::new(Primitive::Group {
-                    primitives: self
-                        .program
-                        .draw(bounds, cursor)
-                        .into_iter()
-                        .map(Geometry::into_primitive)
-                        .collect(),
-                }),
-            },
-            self.program.mouse_interaction(bounds, cursor),
-        )
+        renderer.with_translation(translation, |renderer| {
+            renderer.draw_primitive(Primitive::Group {
+                primitives: self
+                    .program
+                    .draw(bounds, cursor)
+                    .into_iter()
+                    .map(Geometry::into_primitive)
+                    .collect(),
+            });
+        });
     }
 
     fn hash_layout(&self, state: &mut Hasher) {

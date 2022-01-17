@@ -1,30 +1,34 @@
-use crate::container;
 use crate::event::{self, Event};
 use crate::layout;
+use crate::mouse;
 use crate::overlay;
-use crate::pane_grid::{self, TitleBar};
-use crate::{Clipboard, Element, Hasher, Layout, Point, Rectangle, Size};
+use crate::renderer;
+use crate::widget::container;
+use crate::widget::pane_grid::TitleBar;
+use crate::{
+    Clipboard, Element, Hasher, Layout, Point, Rectangle, Shell, Size,
+};
 
 /// The content of a [`Pane`].
 ///
 /// [`Pane`]: crate::widget::pane_grid::Pane
 #[allow(missing_debug_implementations)]
-pub struct Content<'a, Message, Renderer: pane_grid::Renderer> {
+pub struct Content<'a, Message, Renderer> {
     title_bar: Option<TitleBar<'a, Message, Renderer>>,
     body: Element<'a, Message, Renderer>,
-    style: <Renderer as container::Renderer>::Style,
+    style_sheet: Box<dyn container::StyleSheet + 'a>,
 }
 
 impl<'a, Message, Renderer> Content<'a, Message, Renderer>
 where
-    Renderer: pane_grid::Renderer,
+    Renderer: crate::Renderer,
 {
     /// Creates a new [`Content`] with the provided body.
     pub fn new(body: impl Into<Element<'a, Message, Renderer>>) -> Self {
         Self {
             title_bar: None,
             body: body.into(),
-            style: Default::default(),
+            style_sheet: Default::default(),
         }
     }
 
@@ -40,16 +44,16 @@ where
     /// Sets the style of the [`Content`].
     pub fn style(
         mut self,
-        style: impl Into<<Renderer as container::Renderer>::Style>,
+        style_sheet: impl Into<Box<dyn container::StyleSheet + 'a>>,
     ) -> Self {
-        self.style = style.into();
+        self.style_sheet = style_sheet.into();
         self
     }
 }
 
 impl<'a, Message, Renderer> Content<'a, Message, Renderer>
 where
-    Renderer: pane_grid::Renderer,
+    Renderer: crate::Renderer,
 {
     /// Draws the [`Content`] with the provided [`Renderer`] and [`Layout`].
     ///
@@ -57,35 +61,45 @@ where
     pub fn draw(
         &self,
         renderer: &mut Renderer,
-        defaults: &Renderer::Defaults,
+        style: &renderer::Style,
         layout: Layout<'_>,
         cursor_position: Point,
         viewport: &Rectangle,
-    ) -> Renderer::Output {
+    ) {
+        let bounds = layout.bounds();
+
+        {
+            let style = self.style_sheet.style();
+
+            container::draw_background(renderer, &style, bounds);
+        }
+
         if let Some(title_bar) = &self.title_bar {
             let mut children = layout.children();
             let title_bar_layout = children.next().unwrap();
             let body_layout = children.next().unwrap();
 
-            renderer.draw_pane(
-                defaults,
-                layout.bounds(),
-                &self.style,
-                Some((title_bar, title_bar_layout)),
-                (&self.body, body_layout),
+            let show_controls = bounds.contains(cursor_position);
+
+            title_bar.draw(
+                renderer,
+                style,
+                title_bar_layout,
                 cursor_position,
                 viewport,
-            )
+                show_controls,
+            );
+
+            self.body.draw(
+                renderer,
+                style,
+                body_layout,
+                cursor_position,
+                viewport,
+            );
         } else {
-            renderer.draw_pane(
-                defaults,
-                layout.bounds(),
-                &self.style,
-                None,
-                (&self.body, layout),
-                cursor_position,
-                viewport,
-            )
+            self.body
+                .draw(renderer, style, layout, cursor_position, viewport);
         }
     }
 
@@ -148,7 +162,8 @@ where
         cursor_position: Point,
         renderer: &Renderer,
         clipboard: &mut dyn Clipboard,
-        messages: &mut Vec<Message>,
+        shell: &mut Shell<'_, Message>,
+        is_picked: bool,
     ) -> event::Status {
         let mut event_status = event::Status::Ignored;
 
@@ -161,7 +176,7 @@ where
                 cursor_position,
                 renderer,
                 clipboard,
-                messages,
+                shell,
             );
 
             children.next().unwrap()
@@ -169,16 +184,56 @@ where
             layout
         };
 
-        let body_status = self.body.on_event(
-            event,
-            body_layout,
-            cursor_position,
-            renderer,
-            clipboard,
-            messages,
-        );
+        let body_status = if is_picked {
+            event::Status::Ignored
+        } else {
+            self.body.on_event(
+                event,
+                body_layout,
+                cursor_position,
+                renderer,
+                clipboard,
+                shell,
+            )
+        };
 
         event_status.merge(body_status)
+    }
+
+    pub(crate) fn mouse_interaction(
+        &self,
+        layout: Layout<'_>,
+        cursor_position: Point,
+        viewport: &Rectangle,
+        renderer: &Renderer,
+    ) -> mouse::Interaction {
+        let (body_layout, title_bar_interaction) =
+            if let Some(title_bar) = &self.title_bar {
+                let mut children = layout.children();
+                let title_bar_layout = children.next().unwrap();
+
+                let is_over_pick_area = title_bar
+                    .is_over_pick_area(title_bar_layout, cursor_position);
+
+                if is_over_pick_area {
+                    return mouse::Interaction::Grab;
+                }
+
+                let mouse_interaction = title_bar.mouse_interaction(
+                    title_bar_layout,
+                    cursor_position,
+                    viewport,
+                    renderer,
+                );
+
+                (children.next().unwrap(), mouse_interaction)
+            } else {
+                (layout, mouse::Interaction::default())
+            };
+
+        self.body
+            .mouse_interaction(body_layout, cursor_position, viewport, renderer)
+            .max(title_bar_interaction)
     }
 
     pub(crate) fn hash_layout(&self, state: &mut Hasher) {
@@ -192,26 +247,26 @@ where
     pub(crate) fn overlay(
         &mut self,
         layout: Layout<'_>,
+        renderer: &Renderer,
     ) -> Option<overlay::Element<'_, Message, Renderer>> {
-        let body_layout = if self.title_bar.is_some() {
+        if let Some(title_bar) = self.title_bar.as_mut() {
             let mut children = layout.children();
+            let title_bar_layout = children.next()?;
 
-            // Overlays only allowed in the pane body, for now at least.
-            let _title_bar_layout = children.next();
-
-            children.next()?
+            match title_bar.overlay(title_bar_layout, renderer) {
+                Some(overlay) => Some(overlay),
+                None => self.body.overlay(children.next()?, renderer),
+            }
         } else {
-            layout
-        };
-
-        self.body.overlay(body_layout)
+            self.body.overlay(layout, renderer)
+        }
     }
 }
 
 impl<'a, T, Message, Renderer> From<T> for Content<'a, Message, Renderer>
 where
     T: Into<Element<'a, Message, Renderer>>,
-    Renderer: pane_grid::Renderer + container::Renderer,
+    Renderer: crate::Renderer,
 {
     fn from(element: T) -> Self {
         Self::new(element)

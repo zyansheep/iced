@@ -30,7 +30,7 @@
 //! [windowing shell]: https://github.com/hecrj/iced/tree/master/winit
 //! [`dodrio`]: https://github.com/fitzgen/dodrio
 //! [web runtime]: https://github.com/hecrj/iced/tree/master/web
-//! [examples]: https://github.com/hecrj/iced/tree/0.2/examples
+//! [examples]: https://github.com/hecrj/iced/tree/0.3/examples
 //! [repository]: https://github.com/hecrj/iced
 //!
 //! # Overview
@@ -171,7 +171,9 @@
 //!
 //! [Elm]: https://elm-lang.org/
 //! [The Elm Architecture]: https://guide.elm-lang.org/architecture/
-
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/iced-rs/iced/9ab6923e943f784985e9ef9ca28b10278297225d/docs/logo.svg"
+)]
 #![deny(missing_docs)]
 #![deny(missing_debug_implementations)]
 #![deny(unused_results)]
