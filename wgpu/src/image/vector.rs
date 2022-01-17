@@ -1,6 +1,9 @@
 use crate::image::atlas::{self, Atlas};
+
 use iced_native::svg;
+
 use std::collections::{HashMap, HashSet};
+use std::fs;
 
 pub enum Svg {
     Loaded(usvg::Tree),
@@ -45,13 +48,21 @@ impl Cache {
 
         let svg = match handle.data() {
             svg::Data::Path(path) => {
-                match usvg::Tree::from_file(path, &Default::default()) {
-                    Ok(tree) => Svg::Loaded(tree),
-                    Err(_) => Svg::NotFound,
-                }
+                let tree = fs::read_to_string(path).ok().and_then(|contents| {
+                    usvg::Tree::from_str(
+                        &contents,
+                        &usvg::Options::default().to_ref(),
+                    )
+                    .ok()
+                });
+
+                tree.map(Svg::Loaded).unwrap_or(Svg::NotFound)
             }
             svg::Data::Bytes(bytes) => {
-                match usvg::Tree::from_data(&bytes, &Default::default()) {
+                match usvg::Tree::from_data(
+                    &bytes,
+                    &usvg::Options::default().to_ref(),
+                ) {
                     Ok(tree) => Svg::Loaded(tree),
                     Err(_) => Svg::NotFound,
                 }
@@ -74,8 +85,8 @@ impl Cache {
         let id = handle.id();
 
         let (width, height) = (
-            (scale * width).round() as u32,
-            (scale * height).round() as u32,
+            (scale * width).ceil() as u32,
+            (scale * height).ceil() as u32,
         );
 
         // TODO: Optimize!
@@ -99,41 +110,29 @@ impl Cache {
                 // We currently rerasterize the SVG when its size changes. This is slow
                 // as heck. A GPU rasterizer like `pathfinder` may perform better.
                 // It would be cool to be able to smooth resize the `svg` example.
-                let img = resvg::render(
+                let mut img = tiny_skia::Pixmap::new(width, height)?;
+
+                let _ = resvg::render(
                     tree,
                     if width > height {
                         usvg::FitTo::Width(width)
                     } else {
                         usvg::FitTo::Height(height)
                     },
-                    None,
+                    img.as_mut(),
                 )?;
-                let width = img.width();
-                let height = img.height();
 
-                let mut rgba = img.take().into_iter();
-
-                // TODO: Perform conversion in the GPU
-                let bgra: Vec<u8> = std::iter::from_fn(move || {
-                    use std::iter::once;
-
-                    let r = rgba.next()?;
-                    let g = rgba.next()?;
-                    let b = rgba.next()?;
-                    let a = rgba.next()?;
-
-                    Some(once(b).chain(once(g)).chain(once(r)).chain(once(a)))
-                })
-                .flatten()
-                .collect();
+                let mut rgba = img.take();
+                rgba.chunks_exact_mut(4).for_each(|rgba| rgba.swap(0, 2));
 
                 let allocation = texture_atlas.upload(
                     width,
                     height,
-                    bytemuck::cast_slice(bgra.as_slice()),
+                    bytemuck::cast_slice(rgba.as_slice()),
                     device,
                     encoder,
                 )?;
+                log::debug!("allocating {} {}x{}", id, width, height);
 
                 let _ = self.svg_hits.insert(id);
                 let _ = self.rasterized_hits.insert((id, width, height));

@@ -4,6 +4,9 @@
 //!
 //! [`glow`]: https://github.com/grovesNL/glow
 //! [`iced_native`]: https://github.com/hecrj/iced/tree/master/native
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/iced-rs/iced/9ab6923e943f784985e9ef9ca28b10278297225d/docs/logo.svg"
+)]
 #![deny(missing_docs)]
 #![deny(missing_debug_implementations)]
 #![deny(unused_results)]
@@ -29,10 +32,9 @@ pub(crate) use iced_graphics::Transformation;
 pub use widget::*;
 
 pub use iced_graphics::{Error, Viewport};
-pub use iced_native::{
-    Background, Color, Command, HorizontalAlignment, Length, Vector,
-    VerticalAlignment,
-};
+
+pub use iced_native::alignment;
+pub use iced_native::{Alignment, Background, Color, Command, Length, Vector};
 
 /// A [`glow`] graphics renderer for [`iced`].
 ///

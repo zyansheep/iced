@@ -1,5 +1,6 @@
 //! Create interactive, native cross-platform applications.
-use crate::{mouse, Error, Executor, Runtime};
+use crate::mouse;
+use crate::{Error, Executor, Runtime};
 
 pub use iced_winit::Application;
 
@@ -8,7 +9,8 @@ use iced_winit::application;
 use iced_winit::conversion;
 use iced_winit::futures;
 use iced_winit::futures::channel::mpsc;
-use iced_winit::{Cache, Clipboard, Debug, Proxy, Settings};
+use iced_winit::user_interface;
+use iced_winit::{Clipboard, Debug, Proxy, Settings};
 
 use glutin::window::Window;
 use std::mem::ManuallyDrop;
@@ -27,12 +29,15 @@ where
     use futures::task;
     use futures::Future;
     use glutin::event_loop::EventLoop;
+    use glutin::platform::run_return::EventLoopExtRunReturn;
     use glutin::ContextBuilder;
 
     let mut debug = Debug::new();
     debug.startup_started();
 
-    let event_loop = EventLoop::with_user_event();
+    let mut event_loop = EventLoop::with_user_event();
+    let mut proxy = event_loop.create_proxy();
+
     let mut runtime = {
         let executor = E::new().map_err(Error::ExecutorCreationFailed)?;
         let proxy = Proxy::new(event_loop.create_proxy());
@@ -48,14 +53,12 @@ where
 
     let subscription = application.subscription();
 
-    runtime.spawn(init_command);
-    runtime.track(subscription);
-
     let context = {
         let builder = settings.window.into_builder(
             &application.title(),
             application.mode(),
             event_loop.primary_monitor(),
+            settings.id,
         );
 
         let context = ContextBuilder::new()
@@ -86,6 +89,17 @@ where
         })?
     };
 
+    let mut clipboard = Clipboard::connect(context.window());
+
+    application::run_command(
+        init_command,
+        &mut runtime,
+        &mut clipboard,
+        &mut proxy,
+        context.window(),
+    );
+    runtime.track(subscription);
+
     let (mut sender, receiver) = mpsc::unbounded();
 
     let mut instance = Box::pin(run_instance::<A, E, C>(
@@ -93,6 +107,8 @@ where
         compositor,
         renderer,
         runtime,
+        clipboard,
+        proxy,
         debug,
         receiver,
         context,
@@ -101,7 +117,7 @@ where
 
     let mut context = task::Context::from_waker(task::noop_waker_ref());
 
-    event_loop.run(move |event, _, control_flow| {
+    event_loop.run_return(move |event, _, control_flow| {
         use glutin::event_loop::ControlFlow;
 
         if let ControlFlow::Exit = control_flow {
@@ -134,6 +150,8 @@ where
             };
         }
     });
+
+    Ok(())
 }
 
 async fn run_instance<A, E, C>(
@@ -141,9 +159,11 @@ async fn run_instance<A, E, C>(
     mut compositor: C,
     mut renderer: A::Renderer,
     mut runtime: Runtime<E, Proxy<A::Message>, A::Message>,
+    mut clipboard: Clipboard,
+    mut proxy: glutin::event_loop::EventLoopProxy<A::Message>,
     mut debug: Debug,
     mut receiver: mpsc::UnboundedReceiver<glutin::event::Event<'_, A::Message>>,
-    context: glutin::ContextWrapper<glutin::PossiblyCurrent, Window>,
+    mut context: glutin::ContextWrapper<glutin::PossiblyCurrent, Window>,
     exit_on_close_request: bool,
 ) where
     A: Application + 'static,
@@ -153,23 +173,18 @@ async fn run_instance<A, E, C>(
     use glutin::event;
     use iced_winit::futures::stream::StreamExt;
 
-    let mut clipboard = Clipboard::connect(context.window());
-
     let mut state = application::State::new(&application, context.window());
     let mut viewport_version = state.viewport_version();
     let mut user_interface =
         ManuallyDrop::new(application::build_user_interface(
             &mut application,
-            Cache::default(),
+            user_interface::Cache::default(),
             &mut renderer,
             state.logical_size(),
             &mut debug,
         ));
 
-    let mut primitive =
-        user_interface.draw(&mut renderer, state.cursor_position());
     let mut mouse_interaction = mouse::Interaction::default();
-
     let mut events = Vec::new();
     let mut messages = Vec::new();
 
@@ -184,7 +199,7 @@ async fn run_instance<A, E, C>(
 
                 debug.event_processing_started();
 
-                let statuses = user_interface.update(
+                let (interface_state, statuses) = user_interface.update(
                     &events,
                     state.cursor_position(),
                     &mut renderer,
@@ -198,7 +213,12 @@ async fn run_instance<A, E, C>(
                     runtime.broadcast(event);
                 }
 
-                if !messages.is_empty() {
+                if !messages.is_empty()
+                    || matches!(
+                        interface_state,
+                        user_interface::State::Outdated
+                    )
+                {
                     let cache =
                         ManuallyDrop::into_inner(user_interface).into_cache();
 
@@ -206,9 +226,11 @@ async fn run_instance<A, E, C>(
                     application::update(
                         &mut application,
                         &mut runtime,
-                        &mut debug,
                         &mut clipboard,
+                        &mut proxy,
+                        &mut debug,
                         &mut messages,
+                        context.window(),
                     );
 
                     // Update window
@@ -231,17 +253,45 @@ async fn run_instance<A, E, C>(
                 }
 
                 debug.draw_started();
-                primitive =
+                let new_mouse_interaction =
                     user_interface.draw(&mut renderer, state.cursor_position());
                 debug.draw_finished();
 
+                if new_mouse_interaction != mouse_interaction {
+                    context.window().set_cursor_icon(
+                        conversion::mouse_interaction(new_mouse_interaction),
+                    );
+
+                    mouse_interaction = new_mouse_interaction;
+                }
+
                 context.window().request_redraw();
+            }
+            event::Event::PlatformSpecific(event::PlatformSpecific::MacOS(
+                event::MacOS::ReceivedUrl(url),
+            )) => {
+                use iced_native::event;
+                events.push(iced_native::Event::PlatformSpecific(
+                    event::PlatformSpecific::MacOS(event::MacOS::ReceivedUrl(
+                        url,
+                    )),
+                ));
             }
             event::Event::UserEvent(message) => {
                 messages.push(message);
             }
             event::Event::RedrawRequested(_) => {
                 debug.render_started();
+
+                #[allow(unsafe_code)]
+                unsafe {
+                    if !context.is_current() {
+                        context = context
+                            .make_current()
+                            .expect("Make OpenGL context current");
+                    }
+                }
+
                 let current_viewport_version = state.viewport_version();
 
                 if viewport_version != current_viewport_version {
@@ -256,9 +306,19 @@ async fn run_instance<A, E, C>(
                     debug.layout_finished();
 
                     debug.draw_started();
-                    primitive = user_interface
+                    let new_mouse_interaction = user_interface
                         .draw(&mut renderer, state.cursor_position());
                     debug.draw_finished();
+
+                    if new_mouse_interaction != mouse_interaction {
+                        context.window().set_cursor_icon(
+                            conversion::mouse_interaction(
+                                new_mouse_interaction,
+                            ),
+                        );
+
+                        mouse_interaction = new_mouse_interaction;
+                    }
 
                     context.resize(glutin::dpi::PhysicalSize::new(
                         physical_size.width,
@@ -270,25 +330,16 @@ async fn run_instance<A, E, C>(
                     viewport_version = current_viewport_version;
                 }
 
-                let new_mouse_interaction = compositor.draw(
+                compositor.present(
                     &mut renderer,
                     state.viewport(),
                     state.background_color(),
-                    &primitive,
                     &debug.overlay(),
                 );
 
                 context.swap_buffers().expect("Swap buffers");
 
                 debug.render_finished();
-
-                if new_mouse_interaction != mouse_interaction {
-                    context.window().set_cursor_icon(
-                        conversion::mouse_interaction(new_mouse_interaction),
-                    );
-
-                    mouse_interaction = new_mouse_interaction;
-                }
 
                 // TODO: Handle animations!
                 // Maybe we can use `ControlFlow::WaitUntil` for this.

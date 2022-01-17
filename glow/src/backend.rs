@@ -2,12 +2,12 @@ use crate::quad;
 use crate::text;
 use crate::triangle;
 use crate::{Settings, Transformation, Viewport};
+
 use iced_graphics::backend;
 use iced_graphics::font;
-use iced_graphics::Layer;
-use iced_graphics::Primitive;
-use iced_native::mouse;
-use iced_native::{Font, HorizontalAlignment, Size, VerticalAlignment};
+use iced_graphics::{Layer, Primitive};
+use iced_native::alignment;
+use iced_native::{Font, Size};
 
 /// A [`glow`] graphics backend for [`iced`].
 ///
@@ -24,7 +24,12 @@ pub struct Backend {
 impl Backend {
     /// Creates a new [`Backend`].
     pub fn new(gl: &glow::Context, settings: Settings) -> Self {
-        let text_pipeline = text::Pipeline::new(gl, settings.default_font);
+        let text_pipeline = text::Pipeline::new(
+            gl,
+            settings.default_font,
+            settings.text_multithreading,
+        );
+
         let quad_pipeline = quad::Pipeline::new(gl);
         let triangle_pipeline = triangle::Pipeline::new(gl);
 
@@ -40,18 +45,18 @@ impl Backend {
     ///
     /// The text provided as overlay will be rendered on top of the primitives.
     /// This is useful for rendering debug information.
-    pub fn draw<T: AsRef<str>>(
+    pub fn present<T: AsRef<str>>(
         &mut self,
         gl: &glow::Context,
+        primitives: &[Primitive],
         viewport: &Viewport,
-        (primitive, mouse_interaction): &(Primitive, mouse::Interaction),
         overlay_text: &[T],
-    ) -> mouse::Interaction {
+    ) {
         let viewport_size = viewport.physical_size();
         let scale_factor = viewport.scale_factor() as f32;
         let projection = viewport.projection();
 
-        let mut layers = Layer::generate(primitive, viewport);
+        let mut layers = Layer::generate(primitives, viewport);
         layers.push(Layer::overlay(overlay_text, viewport));
 
         for layer in layers {
@@ -63,8 +68,6 @@ impl Backend {
                 viewport_size.height,
             );
         }
-
-        *mouse_interaction
     }
 
     fn flush(
@@ -76,6 +79,11 @@ impl Backend {
         target_height: u32,
     ) {
         let mut bounds = (layer.bounds * scale_factor).snap();
+
+        if bounds.width < 1 || bounds.height < 1 {
+            return;
+        }
+
         bounds.height = bounds.height.min(target_height);
 
         if !layer.quads.is_empty() {
@@ -141,24 +149,24 @@ impl Backend {
                     }],
                     layout: glow_glyph::Layout::default()
                         .h_align(match text.horizontal_alignment {
-                            HorizontalAlignment::Left => {
+                            alignment::Horizontal::Left => {
                                 glow_glyph::HorizontalAlign::Left
                             }
-                            HorizontalAlignment::Center => {
+                            alignment::Horizontal::Center => {
                                 glow_glyph::HorizontalAlign::Center
                             }
-                            HorizontalAlignment::Right => {
+                            alignment::Horizontal::Right => {
                                 glow_glyph::HorizontalAlign::Right
                             }
                         })
                         .v_align(match text.vertical_alignment {
-                            VerticalAlignment::Top => {
+                            alignment::Vertical::Top => {
                                 glow_glyph::VerticalAlign::Top
                             }
-                            VerticalAlignment::Center => {
+                            alignment::Vertical::Center => {
                                 glow_glyph::VerticalAlign::Center
                             }
-                            VerticalAlignment::Bottom => {
+                            alignment::Vertical::Bottom => {
                                 glow_glyph::VerticalAlign::Bottom
                             }
                         }),
@@ -205,6 +213,25 @@ impl backend::Text for Backend {
         bounds: Size,
     ) -> (f32, f32) {
         self.text_pipeline.measure(contents, size, font, bounds)
+    }
+
+    fn hit_test(
+        &self,
+        contents: &str,
+        size: f32,
+        font: Font,
+        bounds: Size,
+        point: iced_native::Point,
+        nearest_only: bool,
+    ) -> Option<text::Hit> {
+        self.text_pipeline.hit_test(
+            contents,
+            size,
+            font,
+            bounds,
+            point,
+            nearest_only,
+        )
     }
 }
 

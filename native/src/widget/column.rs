@@ -3,9 +3,12 @@ use std::hash::Hash;
 
 use crate::event::{self, Event};
 use crate::layout;
+use crate::mouse;
 use crate::overlay;
+use crate::renderer;
 use crate::{
-    Align, Clipboard, Element, Hasher, Layout, Length, Point, Rectangle, Widget,
+    Alignment, Clipboard, Element, Hasher, Layout, Length, Padding, Point,
+    Rectangle, Shell, Widget,
 };
 
 use std::u32;
@@ -14,12 +17,12 @@ use std::u32;
 #[allow(missing_debug_implementations)]
 pub struct Column<'a, Message, Renderer> {
     spacing: u16,
-    padding: u16,
+    padding: Padding,
     width: Length,
     height: Length,
     max_width: u32,
     max_height: u32,
-    align_items: Align,
+    align_items: Alignment,
     children: Vec<Element<'a, Message, Renderer>>,
 }
 
@@ -35,12 +38,12 @@ impl<'a, Message, Renderer> Column<'a, Message, Renderer> {
     ) -> Self {
         Column {
             spacing: 0,
-            padding: 0,
+            padding: Padding::ZERO,
             width: Length::Shrink,
             height: Length::Shrink,
             max_width: u32::MAX,
             max_height: u32::MAX,
-            align_items: Align::Start,
+            align_items: Alignment::Start,
             children,
         }
     }
@@ -55,9 +58,9 @@ impl<'a, Message, Renderer> Column<'a, Message, Renderer> {
         self
     }
 
-    /// Sets the padding of the [`Column`].
-    pub fn padding(mut self, units: u16) -> Self {
-        self.padding = units;
+    /// Sets the [`Padding`] of the [`Column`].
+    pub fn padding<P: Into<Padding>>(mut self, padding: P) -> Self {
+        self.padding = padding.into();
         self
     }
 
@@ -86,7 +89,7 @@ impl<'a, Message, Renderer> Column<'a, Message, Renderer> {
     }
 
     /// Sets the horizontal alignment of the contents of the [`Column`] .
-    pub fn align_items(mut self, align: Align) -> Self {
+    pub fn align_items(mut self, align: Alignment) -> Self {
         self.align_items = align;
         self
     }
@@ -104,7 +107,7 @@ impl<'a, Message, Renderer> Column<'a, Message, Renderer> {
 impl<'a, Message, Renderer> Widget<Message, Renderer>
     for Column<'a, Message, Renderer>
 where
-    Renderer: self::Renderer,
+    Renderer: crate::Renderer,
 {
     fn width(&self) -> Length {
         self.width
@@ -129,7 +132,7 @@ where
             layout::flex::Axis::Vertical,
             renderer,
             &limits,
-            self.padding as f32,
+            self.padding,
             self.spacing as f32,
             self.align_items,
             &self.children,
@@ -143,7 +146,7 @@ where
         cursor_position: Point,
         renderer: &Renderer,
         clipboard: &mut dyn Clipboard,
-        messages: &mut Vec<Message>,
+        shell: &mut Shell<'_, Message>,
     ) -> event::Status {
         self.children
             .iter_mut()
@@ -155,27 +158,45 @@ where
                     cursor_position,
                     renderer,
                     clipboard,
-                    messages,
+                    shell,
                 )
             })
             .fold(event::Status::Ignored, event::Status::merge)
     }
 
-    fn draw(
+    fn mouse_interaction(
         &self,
-        renderer: &mut Renderer,
-        defaults: &Renderer::Defaults,
         layout: Layout<'_>,
         cursor_position: Point,
         viewport: &Rectangle,
-    ) -> Renderer::Output {
-        renderer.draw(
-            defaults,
-            &self.children,
-            layout,
-            cursor_position,
-            viewport,
-        )
+        renderer: &Renderer,
+    ) -> mouse::Interaction {
+        self.children
+            .iter()
+            .zip(layout.children())
+            .map(|(child, layout)| {
+                child.widget.mouse_interaction(
+                    layout,
+                    cursor_position,
+                    viewport,
+                    renderer,
+                )
+            })
+            .max()
+            .unwrap_or_default()
+    }
+
+    fn draw(
+        &self,
+        renderer: &mut Renderer,
+        style: &renderer::Style,
+        layout: Layout<'_>,
+        cursor_position: Point,
+        viewport: &Rectangle,
+    ) {
+        for (child, layout) in self.children.iter().zip(layout.children()) {
+            child.draw(renderer, style, layout, cursor_position, viewport);
+        }
     }
 
     fn hash_layout(&self, state: &mut Hasher) {
@@ -198,42 +219,22 @@ where
     fn overlay(
         &mut self,
         layout: Layout<'_>,
+        renderer: &Renderer,
     ) -> Option<overlay::Element<'_, Message, Renderer>> {
         self.children
             .iter_mut()
             .zip(layout.children())
-            .filter_map(|(child, layout)| child.widget.overlay(layout))
+            .filter_map(|(child, layout)| {
+                child.widget.overlay(layout, renderer)
+            })
             .next()
     }
-}
-
-/// The renderer of a [`Column`].
-///
-/// Your [renderer] will need to implement this trait before being
-/// able to use a [`Column`] in your user interface.
-///
-/// [renderer]: crate::renderer
-pub trait Renderer: crate::Renderer + Sized {
-    /// Draws a [`Column`].
-    ///
-    /// It receives:
-    /// - the children of the [`Column`]
-    /// - the [`Layout`] of the [`Column`] and its children
-    /// - the cursor position
-    fn draw<Message>(
-        &mut self,
-        defaults: &Self::Defaults,
-        content: &[Element<'_, Message, Self>],
-        layout: Layout<'_>,
-        cursor_position: Point,
-        viewport: &Rectangle,
-    ) -> Self::Output;
 }
 
 impl<'a, Message, Renderer> From<Column<'a, Message, Renderer>>
     for Element<'a, Message, Renderer>
 where
-    Renderer: 'a + self::Renderer,
+    Renderer: 'a + crate::Renderer,
     Message: 'a,
 {
     fn from(

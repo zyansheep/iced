@@ -1,6 +1,6 @@
 //! A [`wgpu`] renderer for [`iced_native`].
 //!
-//! ![The native path of the Iced ecosystem](https://github.com/hecrj/iced/blob/0525d76ff94e828b7b21634fa94a747022001c83/docs/graphs/native.png?raw=true)
+//! ![The native path of the Iced ecosystem](https://github.com/iced-rs/iced/blob/0525d76ff94e828b7b21634fa94a747022001c83/docs/graphs/native.png?raw=true)
 //!
 //! For now, it is the default renderer of [Iced] in native platforms.
 //!
@@ -15,11 +15,14 @@
 //! - Images and SVG, loaded from memory or the file system.
 //! - Meshes of triangles, useful to draw geometry freely.
 //!
-//! [Iced]: https://github.com/hecrj/iced
-//! [`iced_native`]: https://github.com/hecrj/iced/tree/master/native
+//! [Iced]: https://github.com/iced-rs/iced
+//! [`iced_native`]: https://github.com/iced-rs/iced/tree/master/native
 //! [`wgpu`]: https://github.com/gfx-rs/wgpu-rs
 //! [WebGPU API]: https://gpuweb.github.io/gpuweb/
 //! [`wgpu_glyph`]: https://github.com/hecrj/wgpu_glyph
+#![doc(
+    html_logo_url = "https://raw.githubusercontent.com/iced-rs/iced/9ab6923e943f784985e9ef9ca28b10278297225d/docs/logo.svg"
+)]
 #![deny(missing_docs)]
 #![deny(missing_debug_implementations)]
 #![deny(unused_results)]
@@ -36,9 +39,7 @@ mod backend;
 mod quad;
 mod text;
 
-pub use iced_graphics::{
-    Antialiasing, Color, Defaults, Error, Primitive, Viewport,
-};
+pub use iced_graphics::{Antialiasing, Color, Error, Primitive, Viewport};
 pub use wgpu;
 
 pub use backend::Backend;
@@ -55,5 +56,5 @@ mod image;
 /// A [`wgpu`] graphics renderer for [`iced`].
 ///
 /// [`wgpu`]: https://github.com/gfx-rs/wgpu-rs
-/// [`iced`]: https://github.com/hecrj/iced
+/// [`iced`]: https://github.com/iced-rs/iced
 pub type Renderer = iced_graphics::Renderer<Backend>;

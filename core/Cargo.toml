@@ -5,10 +5,11 @@ authors = ["Héctor Ramón Jiménez <hector0193@gmail.com>"]
 edition = "2018"
 description = "The essential concepts of Iced"
 license = "MIT"
-repository = "https://github.com/hecrj/iced"
+repository = "https://github.com/iced-rs/iced"
 
 [dependencies]
+bitflags = "1.2"
 
 [dependencies.palette]
-version = "0.5.0"
+version = "0.5"
 optional = true

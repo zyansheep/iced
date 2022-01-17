@@ -1,7 +1,7 @@
 use iced::{
-    button, scrollable, slider, text_input, Button, Checkbox, Color, Column,
-    Container, Element, HorizontalAlignment, Image, Length, Radio, Row,
-    Sandbox, Scrollable, Settings, Slider, Space, Text, TextInput,
+    alignment, button, scrollable, slider, text_input, Button, Checkbox, Color,
+    Column, Container, Element, Image, Length, Radio, Row, Sandbox, Scrollable,
+    Settings, Slider, Space, Text, TextInput, Toggler,
 };
 
 pub fn main() -> iced::Result {
@@ -135,6 +135,9 @@ impl Steps {
                     color: Color::BLACK,
                 },
                 Step::Radio { selection: None },
+                Step::Toggler {
+                    can_continue: false,
+                },
                 Step::Image {
                     width: 300,
                     slider: slider::State::new(),
@@ -206,6 +209,9 @@ enum Step {
     Radio {
         selection: Option<Language>,
     },
+    Toggler {
+        can_continue: bool,
+    },
     Image {
         width: u16,
         slider: slider::State,
@@ -232,6 +238,7 @@ pub enum StepMessage {
     InputChanged(String),
     ToggleSecureInput(bool),
     DebugToggled(bool),
+    TogglerChanged(bool),
 }
 
 impl<'a> Step {
@@ -287,6 +294,11 @@ impl<'a> Step {
                     *is_secure = toggle;
                 }
             }
+            StepMessage::TogglerChanged(value) => {
+                if let Step::Toggler { can_continue, .. } = self {
+                    *can_continue = value;
+                }
+            }
         };
     }
 
@@ -294,6 +306,7 @@ impl<'a> Step {
         match self {
             Step::Welcome => "Welcome",
             Step::Radio { .. } => "Radio button",
+            Step::Toggler { .. } => "Toggler",
             Step::Slider { .. } => "Slider",
             Step::Text { .. } => "Text",
             Step::Image { .. } => "Image",
@@ -309,6 +322,7 @@ impl<'a> Step {
         match self {
             Step::Welcome => true,
             Step::Radio { selection } => *selection == Some(Language::Rust),
+            Step::Toggler { can_continue } => *can_continue,
             Step::Slider { .. } => true,
             Step::Text { .. } => true,
             Step::Image { .. } => true,
@@ -324,6 +338,7 @@ impl<'a> Step {
         match self {
             Step::Welcome => Self::welcome(),
             Step::Radio { selection } => Self::radio(*selection),
+            Step::Toggler { can_continue } => Self::toggler(*can_continue),
             Step::Slider { state, value } => Self::slider(state, *value),
             Step::Text {
                 size_slider,
@@ -402,9 +417,9 @@ impl<'a> Step {
                 StepMessage::SliderChanged,
             ))
             .push(
-                Text::new(&value.to_string())
+                Text::new(value.to_string())
                     .width(Length::Fill)
-                    .horizontal_alignment(HorizontalAlignment::Center),
+                    .horizontal_alignment(alignment::Horizontal::Center),
             )
     }
 
@@ -449,9 +464,9 @@ impl<'a> Step {
                 StepMessage::SpacingChanged,
             ))
             .push(
-                Text::new(&format!("{} px", spacing))
+                Text::new(format!("{} px", spacing))
                     .width(Length::Fill)
-                    .horizontal_alignment(HorizontalAlignment::Center),
+                    .horizontal_alignment(alignment::Horizontal::Center),
             );
 
         Self::container("Rows and columns")
@@ -481,9 +496,7 @@ impl<'a> Step {
             .padding(20)
             .spacing(20)
             .push(Text::new("You can change its size:"))
-            .push(
-                Text::new(&format!("This text is {} pixels", size)).size(size),
-            )
+            .push(Text::new(format!("This text is {} pixels", size)).size(size))
             .push(Slider::new(
                 size_slider,
                 10..=70,
@@ -503,7 +516,7 @@ impl<'a> Step {
             .padding(20)
             .spacing(20)
             .push(Text::new("And its color:"))
-            .push(Text::new(&format!("{:?}", color)).color(color))
+            .push(Text::new(format!("{:?}", color)).color(color))
             .push(color_sliders);
 
         Self::container("Text")
@@ -545,6 +558,21 @@ impl<'a> Step {
             ))
     }
 
+    fn toggler(can_continue: bool) -> Column<'a, StepMessage> {
+        Self::container("Toggler")
+            .push(Text::new(
+                "A toggler is mostly used to enable or disable something.",
+            ))
+            .push(
+                Container::new(Toggler::new(
+                    can_continue,
+                    String::from("Toggle me to continue..."),
+                    StepMessage::TogglerChanged,
+                ))
+                .padding([0, 40]),
+            )
+    }
+
     fn image(
         width: u16,
         slider: &'a mut slider::State,
@@ -559,9 +587,9 @@ impl<'a> Step {
                 StepMessage::ImageWidthChanged,
             ))
             .push(
-                Text::new(&format!("Width: {} px", width.to_string()))
+                Text::new(format!("Width: {} px", width.to_string()))
                     .width(Length::Fill)
-                    .horizontal_alignment(HorizontalAlignment::Center),
+                    .horizontal_alignment(alignment::Horizontal::Center),
             )
     }
 
@@ -582,7 +610,7 @@ impl<'a> Step {
                 Text::new("You are halfway there!")
                     .width(Length::Fill)
                     .size(30)
-                    .horizontal_alignment(HorizontalAlignment::Center),
+                    .horizontal_alignment(alignment::Horizontal::Center),
             )
             .push(Column::new().height(Length::Units(4096)))
             .push(ferris(300))
@@ -590,7 +618,7 @@ impl<'a> Step {
                 Text::new("You made it!")
                     .width(Length::Fill)
                     .size(50)
-                    .horizontal_alignment(HorizontalAlignment::Center),
+                    .horizontal_alignment(alignment::Horizontal::Center),
             )
     }
 
@@ -632,7 +660,7 @@ impl<'a> Step {
                     value
                 })
                 .width(Length::Fill)
-                .horizontal_alignment(HorizontalAlignment::Center),
+                .horizontal_alignment(alignment::Horizontal::Center),
             )
     }
 
@@ -650,7 +678,7 @@ impl<'a> Step {
                 Element::new(
                     Text::new("Not available on web yet!")
                         .color([0.7, 0.7, 0.7])
-                        .horizontal_alignment(HorizontalAlignment::Center),
+                        .horizontal_alignment(alignment::Horizontal::Center),
                 )
             } else {
                 Element::new(Checkbox::new(
@@ -676,7 +704,7 @@ fn ferris<'a>(width: u16) -> Container<'a, StepMessage> {
         // This should go away once we unify resource loading on native
         // platforms
         if cfg!(target_arch = "wasm32") {
-            Image::new("images/ferris.png")
+            Image::new("tour/images/ferris.png")
         } else {
             Image::new(format!(
                 "{}/images/ferris.png",
@@ -695,7 +723,7 @@ fn button<'a, Message: Clone>(
 ) -> Button<'a, Message> {
     Button::new(
         state,
-        Text::new(label).horizontal_alignment(HorizontalAlignment::Center),
+        Text::new(label).horizontal_alignment(alignment::Horizontal::Center),
     )
     .padding(12)
     .min_width(100)
